@@ -1,0 +1,133 @@
+---
+title: "PSTAT 231 - Homework 2"
+author: "Tomas"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    code_folding: show
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE,
+                      warning = FALSE)
+library(tidyverse)
+library(tidymodels)
+abalone = read_csv("abalone.csv")
+```
+
+## Linear Regression
+### Question 1:
+  **Your goal is to predict abalone age, which is calculated as the number of rings plus 1.5. Notice there currently is no age variable in the data set. Add age to the data set. Assess and describe the distribution of age.** The abalone age distribution is skewed-right, with the median age being approximately 10.5 years. In particular, the majority of the abalone ages are in the 8 to 12 year range (inclusively).
+```{r, eval = TRUE, indent = "  "}
+abalone = abalone %>% mutate(age=rings+1.5)
+
+hist(abalone$age, breaks=20, main="Distribution of Abalone Ages", xlab="Abalone Age")
+str_interp("Abalone Median Age: ${median(abalone$age)}")
+```
+  
+### Question 2:
+  **Split the abalone data into a training set and a testing set. Use stratified sampling. You should decide on appropriate percentages for splitting the data.**
+```{r, eval = TRUE, indent = "  "}
+set.seed(7052)
+
+abalone_split = initial_split(abalone, prop=0.80, strata=age)
+abalone_train = training(abalone_split)
+abalone_test = testing(abalone_split)
+```
+
+### Question 3:
+  **Using the training data, create a recipe predicting the outcome variable, age, with all other predictor variables. Note that you should not include rings to predict age. Explain why you shouldn’t use rings to predict age.** Recall that age was computed as a function of rings (namely age=rings+1.5), i.e. age and rings are not independent of each other. Therefore, rings should not be used to predict age.
+```{r, eval = TRUE, indent = "  "}
+abalone_train = subset(abalone_train, select=-c(rings))
+abalone_test = subset(abalone_test, select=-c(rings))
+
+age_recipe = recipe(age ~ ., data=abalone_train) %>%
+  step_dummy(type, levels=3) %>%
+  step_interact(terms=~type:shucked_weight) %>%
+  step_interact(terms=~longest_shell:diameter) %>%
+  step_interact(terms=~shucked_weight:shell_weight) %>%
+  step_normalize()
+```
+
+### Question 4:
+  **Create and store a linear regression object using the "lm" engine.**
+```{r, eval = TRUE, indent = "  "}
+lm_model = linear_reg() %>% set_engine("lm")
+```
+
+### Question 5:
+  **Now,**
+  
+  1. **Set up an empty workflow.**
+  2. **Add the model you created in Question 4.**
+  3. **Add the recipe that you created in Question 3.**
+```{r, eval = TRUE, indent = "  "}
+lm_wflow = workflow() %>% 
+  add_model(lm_model) %>% 
+  add_recipe(age_recipe)
+```
+
+### Question 6:
+  **Use your fit() object to predict the age of a hypothetical female abalone with longest_shell = 0.50, diameter = 0.10, height = 0.30, whole_weight = 4, shucked_weight = 1, viscera_weight = 2, shell_weight = 1.** The model predicts that the hypothetical abalone is 22.85389	years old.
+```{r, eval = TRUE, indent = "  "}
+lm_fit = fit(lm_wflow, abalone_train)
+
+sample_abalone = data.frame(type='F', longest_shell=0.5, diameter=0.1,
+                            height=0.3, whole_weight=4, shucked_weight=1,
+                            viscera_weight=2, shell_weight=1)
+sample_age = predict(lm_fit, new_data=sample_abalone)
+print(sample_age)
+```
+
+### Question 7:
+  **Now you want to assess your model’s performance. To do this, use the yardstick package:**
+  
+  1. **Create a metric set that includes R2, RMSE (root mean squared error), and MAE (mean absolute error).**
+  2. **Use predict() and bind_cols() to create a tibble of your model’s predicted values from the training data along with the actual observed ages (these are needed to assess your model’s performance).**
+  3. **Finally, apply your metric set to the tibble, report the results, and interpret the R2 value.** The R2, RMSE, MAE values are 0.5601695, 2.1274275, and 1.5477639, respectively. Recall that the R2 value represents the proportion of the variance of a response variable that's explained by the predictors of a regression model. Since R2 value is 0.5601695, slightly more than half (approximately 56%) of the variation of abalone ages can be explained by the predictors (type, longest_shell, diameter, height, whole_weight, shucked_weight, viscera_weight, shell_weight).
+```{r, eval = TRUE, indent = "  "}
+lm_metrics = metric_set(rsq, rmse, mae)
+abalone_train_res = predict(lm_fit, new_data=abalone_train)
+abalone_train_res = bind_cols(abalone_train_res, abalone_train %>% select(age))
+
+abalone_metrics = metric_set(rsq, rmse, mae)
+abalone_metrics(abalone_train_res, truth=age, estimate=.pred)
+```
+
+## Required for 231 Students
+### Question 8:
+  **Which term(s) in the bias-variance tradeoff above represent the reproducible error? Which term(s) represent the irreducible error?**
+  The $Var(\hat{f}(x_0)) + [Bias(\hat{f}(x_0))]^2$ term represents the reproducible error. The $Var(\epsilon)$ term represents the irreducible error.
+
+### Question 9:
+  **Using the bias-variance tradeoff above, demonstrate that the expected test error is always at least as large as the irreducible error.**
+  
+  The terms $Var(\hat{f}(x_0))$ and $[Bias(\hat{f}(x_0))]^2$ are non-negative. This implies that $$E[(y_0 - \hat{f}(x_0))^2] = Var(\hat{f}(x_0)) + [Bias(\hat{f}(x_0))]^2 + Var(\epsilon) \geq Var(\epsilon),$$ i.e. the expected test error is at least as large as the irreducible error.
+
+### Question 10:
+  **Prove the bias-variance tradeoff.**
+  
+  Since $\epsilon$ is zero-mean random noise, it follows that $E[\epsilon] = 0$. By the linearity of the Expected Value:
+  \begin{align}
+    E[(y_0 - \hat{f}(x_0))^2]
+    &= E[(f(x_0) + \epsilon - \hat{f}(x_0))^2] \\
+    &= E[((f(x_0) - \hat{f}(x_0)) + \epsilon)^2] \\
+    &= E[(f(x_0) - \hat{f}(x_0))^2 + 2(f(x_0) - \hat{f}(x_0)) \epsilon + \epsilon^2] \\
+    &= E[(f(x_0) - \hat{f}(x_0))^2] + E[2(f(x_0) - \hat{f}(x_0)) \epsilon] + E[\epsilon^2] \\
+    &= E[(f(x_0) - \hat{f}(x_0))^2] + 2E[(f(x_0) - \hat{f}(x_0))]E[\epsilon] + E[\epsilon^2] \\
+    &= E[(f(x_0) - \hat{f}(x_0))^2] + 2E[(f(x_0) - \hat{f}(x_0))] \cdot 0 + Var(\epsilon) \\
+    &= E[(f(x_0) - \hat{f}(x_0))^2] + Var(\epsilon).
+  \end{align}
+  The terms $f(x_0)$ and $E[\hat{f}(x_0)]$ are constant. Then, $(f(x_0) - E[\hat{f}(x_0)])^2$ is constant. This implies that $$E[(f(x_0) - E[\hat{f}(x_0)])^2] = (f(x_0) - E[\hat{f}(x_0)])^2 = [Bias(\hat{f}(x_0))]^2.$$ By the linearity of the Expected Value $$E[(E[\hat{f}(x_0)] - \hat{f}(x_0))] = E[(E[\hat{f}(x_0)]] - E[\hat{f}(x_0))] = E[\hat{f}(x_0)] - E[\hat{f}(x_0)] = 0.$$ Therefore,
+  \begin{align}
+    & E[(f(x_0) - \hat{f}(x_0))^2] \\
+    =& E[((f(x_0) - E[\hat{f}(x_0)]) + (E[\hat{f}(x_0)] - \hat{f}(x_0)))^2] \\
+    =& E[(f(x_0) - E[\hat{f}(x_0)])^2 + 2(f(x_0) - E[\hat{f}(x_0)])(E[\hat{f}(x_0)] - \hat{f}(x_0)) + (E[\hat{f}(x_0)] - \hat{f}(x_0))^2] \\
+    =& E[(f(x_0) - E[\hat{f}(x_0)])^2] + E[2(f(x_0) - E[\hat{f}(x_0)])(E[\hat{f}(x_0)] - \hat{f}(x_0))] + E[(E[\hat{f}(x_0)] - \hat{f}(x_0))^2] \\
+    =& [Bias(\hat{f}(x_0))]^2 + 2E[f(x_0) - E[\hat{f}(x_0)]E[E[\hat{f}(x_0)] - \hat{f}(x_0)] + Var(\hat{f}(x_0)) \\
+    =& Var(\hat{f}(x_0)) + [Bias(\hat{f}(x_0))]^2.
+  \end{align}
+  As a result, $$E[(y_0 - \hat{f}(x_0))^2] = Var(\hat{f}(x_0)) + [Bias(\hat{f}(x_0))]^2 + Var(\epsilon).$$
