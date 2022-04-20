@@ -1,0 +1,241 @@
+---
+title: "PSTAT 231 - Homework 3"
+author: "Tomas"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    code_folding: show
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE,
+                      warning = FALSE)
+
+library(tidyverse)
+library(tidymodels)
+library(dbplyr)
+library(ggplot2)
+library(poissonreg)
+library(corrr)
+library(klaR)
+library(readr)
+library(discrim)
+library(MASS)
+tidymodels_prefer()
+
+titanic = read_csv("titanic.csv")
+titanic$survived = as.factor(titanic$survived)
+titanic$survived = ordered(titanic$survived, levels = c("Yes", "No"))
+titanic$pclass = as.factor(titanic$pclass)
+```
+
+## Classification
+### Question 1
+  **Split the data, stratifying on the outcome variable, `survived.`  You should choose the proportions to split the data into. Verify that the training and testing data sets have the appropriate number of observations. Take a look at the training data and note any potential issues, such as missing data. Why is it a good idea to use stratified sampling for this data?**
+
+  The original titanic data set has 891 observations. The training and testing sets have the appropriate number of observations as 0.7x891 and 0.3x891 are approximately 623 and 268. Additionally, 623 and 268 add up to 891.
+  
+  It can be observed that the some of the observations in the training set contain missing values (namely for the age, cabin, and embarked variables). In other words, the training set is incomplete. Not handling the missing values may result in inaccurate predictions.
+  
+  Stratified sampling results in a sample that accurately represents the sample population with respect to a particular variable (in this case, survived). Namely, the proportion of different categories is the same in the original data set and the training set.
+
+```{r, eval=TRUE, indent="  "}
+count_missing_per_column = function(df){
+  return (sapply(df, function(x) sum(is.na(x))))
+}
+
+set.seed(7095)
+
+titanic_split <- initial_split(titanic, prop=0.70, strata=survived) #prop=81
+titanic_train <- training(titanic_split)
+titanic_test <- testing(titanic_split)
+
+str_interp("Total Observations: ${nrow(titanic)}")
+str_interp("Train Observations: ${nrow(titanic_train)}")
+str_interp("Test Observations: ${nrow(titanic_test)}")
+
+missing_counts = count_missing_per_column(titanic)
+print(missing_counts)
+```
+
+### Question 2
+  **Using the training data set, explore/describe the distribution of the outcome variable `survived`.**
+  
+  The variable `survived` has two possible values: Yes and No. The histogram shows that more dead passengers are present in the data set, than there are passengers that survived. In particular, approximately 38 percent of the passengers in the training set survived while approximately 62 percent of the passengers in the training set did not survive.
+
+```{r, eval=TRUE, indent="  "}
+titanic_train %>%
+  ggplot(aes(x=survived)) +
+  geom_histogram(stat='count')
+
+table(titanic_train$survived)
+```
+
+### Question 3
+  **Using the training data set, create a correlation matrix of all continuous variables. Create a visualization of the matrix, and describe any patterns you see. Are any predictors correlated with each other? Which ones, and in which direction?**
+  
+  The following correlations exist:
+  
+  * Weak Negative Correlation: (sib_sp, age), (parch, age)
+  * Weak Positive Correlation: (sib_sp, fare), (parch, fare)
+  * Moderate Positive Correlation: (sib_sp, parch)
+
+  There exists no correlation between any variable-pair that is not mentioned.
+
+```{r, eval=TRUE, indent="  "}
+corr_matrix = titanic_train %>%
+  select(passenger_id, age, sib_sp, parch, fare) %>%
+  correlate(use="pairwise.complete.obs", method="pearson") 
+corr_matrix %>%
+  stretch() %>%
+  ggplot(aes(x, y, fill=r)) +
+  geom_tile() +
+  geom_text(aes(label=as.character(fashion(r))))
+```
+\newpage
+
+### Question 4
+  **Using the training data, create a recipe predicting the outcome variable `survived`. Include the following predictors: ticket class, sex, age, number of siblings or spouses aboard, number of parents or children aboard, and passenger fare. Recall that there were missing values for `age`. To deal with this, add an imputation step using `step_impute_linear()`. Next, use `step_dummy()` to dummy encode categorical predictors. Finally, include interactions between:**
+
+* **Sex and passenger fare**
+* **Age and passenger fare.**
+
+```{r, eval=TRUE, indent="  "}
+titanic_recipe = recipe(survived ~ pclass+sex+age+sib_sp+parch+fare, data=titanic_train) %>%
+  step_impute_linear(age) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_interact(terms=~starts_with("sex"):fare) %>%
+  step_interact(~age:fare)
+```
+
+### Question 5
+  **Specify a logistic regression model for classification using the `"glm"` engine. Then create a workflow. Add your model and the appropriate recipe. Finally, use `fit()` to apply your workflow to the training data.**
+```{r, eval=TRUE, indent="  "}
+logreg_model = logistic_reg() %>%
+  set_engine("glm") %>%
+  set_mode("classification")
+logreg_flow = workflow() %>%
+  add_model(logreg_model) %>%
+  add_recipe(titanic_recipe)
+logreg_fit = fit(logreg_flow, titanic_train)
+```
+
+### Question 6
+  **Repeat Question 5, but this time specify a linear discriminant analysis model for classification using the `"MASS"` engine.**
+```{r, eval=TRUE, indent="  "}
+lda_model = discrim_linear() %>%
+  set_mode("classification") %>%
+  set_engine("MASS")
+lda_flow = workflow() %>%
+  add_model(lda_model) %>%
+  add_recipe(titanic_recipe)
+lda_fit = fit(lda_flow, titanic_train)
+```
+
+### Question 7
+  **Repeat Question 5, but this time specify a quadratic discriminant analysis model for classification using the `"MASS"` engine.**
+```{r, eval=TRUE, indent="  "}
+qda_model = discrim_quad() %>%
+  set_mode("classification") %>%
+  set_engine("MASS")
+qda_flow = workflow() %>%
+  add_model(qda_model) %>%
+  add_recipe(titanic_recipe)
+qda_fit = fit(qda_flow, titanic_train)
+```
+
+### Question 8
+  **Repeat Question 5, but this time specify a naive Bayes model for classification using the `"klaR"` engine. Set the `usekernel` argument to `FALSE`.**
+```{r, eval=TRUE, indent="  "}
+nbayes_model = naive_Bayes() %>% 
+  set_mode("classification") %>% 
+  set_engine("klaR") %>% 
+  set_args(usekernel = FALSE) 
+nbayes_wkflow = workflow() %>% 
+  add_model(nbayes_model) %>% 
+  add_recipe(titanic_recipe)
+nbayes_fit = fit(nbayes_wkflow, titanic_train)
+```
+
+### Question 9
+  **Now you've fit four different models to your training data. Use `predict()` and `bind_cols()` to generate predictions using each of these 4 models and your training data. Then use the accuracy metric to assess the performance of each of the four models. Which model achieved the highest accuracy on the training data?**
+  
+  The following list shows the model names in order of decreasing accuracy: Logistic Regression	(0.8009631), LDA (0.7929374), Naive Bayes (0.7672552), QDA (0.7624398).
+
+```{r, eval=TRUE, indent="  "}
+get_survived_predictions = function(model_predictions){
+  survived = model_predictions$.pred_No < model_predictions$.pred_Yes
+  return (factor(survived, labels = c("No", "Yes")))
+}
+
+logreg_predict = predict(logreg_fit, new_data=titanic_train, type="prob")
+lda_predict = predict(lda_fit, new_data=titanic_train, type="prob")
+qda_predict = predict(qda_fit, new_data=titanic_train, type="prob")
+nbayes_predict = predict(nbayes_fit, new_data=titanic_train, type="prob")
+
+predictions = bind_cols(survived=titanic_train$survived,
+                        logistic_regression_pred=get_survived_predictions(logreg_predict),
+                        lda_pred=get_survived_predictions(lda_predict),
+                        qda_pred=get_survived_predictions(qda_predict),
+                        naive_bayes_pred=get_survived_predictions(nbayes_predict))
+print(predictions)
+
+logreg_acc = augment(logreg_fit, new_data=titanic_train) %>%
+  accuracy(truth=survived, estimate=.pred_class)
+lda_acc = augment(lda_fit, new_data=titanic_train) %>%
+  accuracy(truth=survived, estimate=.pred_class)
+qda_acc = augment(qda_fit, new_data = titanic_train) %>%
+  accuracy(truth=survived, estimate=.pred_class)
+nbayes_acc = augment(nbayes_fit, new_data = titanic_train) %>%
+  accuracy(truth=survived, estimate=.pred_class)
+
+accs = c(logreg_acc$.estimate, lda_acc$.estimate, qda_acc$.estimate, nbayes_acc$.estimate)
+model_names = c("Logistic Regression", "LDA", "QDA", "Naive Bayes")
+accuracies = tibble(model_name=model_names, accuracy=accs)
+print(accuracies)
+```
+
+### Question 10
+  **Fit the model with the highest training accuracy to the testing data. Report the accuracy of the model on the testing data. Again using the testing data, create a confusion matrix and visualize it. Plot an ROC curve and calculate the area under it (AUC). How did the model perform? Compare its training and testing accuracies. If the values differ, why do you think this is so?**
+  
+  The Logistic Regression (LR) model achieved the highest accuracy on the training set (0.8009631). The accuracy of the LR model on the testing data is 0.8358209. Thus, the LR model performs relatively well on both sets (over 80 percent). Additionally, the accuracy obtained on the testing data is greater than that obtained on the training data. This may be due to the smaller size of the testing set; namely, the model may overfit on the smaller data set.
+  
+  Additionally, AUC is 0.8636069.
+
+```{r, eval=TRUE, indent="  "}
+prediction = predict(logreg_fit, new_data=titanic_test, type="prob")
+logreg_acc = augment(logreg_fit, new_data=titanic_test) %>%
+  accuracy(truth=survived, estimate=.pred_class)
+
+str_interp("Logistic Regression Accuracy on Testing Data: ${logreg_acc$.estimate}")
+
+augment(logreg_fit, new_data=titanic_test) %>%
+  conf_mat(truth=survived, estimate=.pred_class) %>%
+  autoplot(type="heatmap")
+augment(logreg_fit, new_data=titanic_test) %>%
+  roc_curve(survived, .pred_Yes) %>%
+  autoplot()
+augment(logreg_fit,new_data=titanic_test) %>%
+  roc_auc(survived, .pred_Yes)
+```
+
+## Required for 231 Students
+
+### Question 11
+**Prove that the inverse of a logistic function is indeed the logit function.**
+
+The claim is verified below:
+\begin{align*}
+  p(z(x)) &= \frac{e^{\ln\left(\frac{x}{1-x}\right)}}{1+e^{\ln\left(\frac{x}{1-x}\right)}} = \frac{\frac{x}{1-x}}{1+\frac{x}{1-x}} = \frac{x}{(1-x)+x} = x \\
+  z(p(x)) &= \ln\left(\frac{\frac{e^x}{1+e^x}}{1-\frac{e^x}{1+e^x}}\right) = \ln\left(\frac{e^x}{(1+e^x)-e^x}\right) = \ln\left(e^x\right) = x.
+\end{align*}
+
+### Question 12
+**Assume that $z = \beta_0 + \beta_{1}x_{1}$ and $p = logistic(z)$. How do the odds of the outcome change if you increase $x_{1}$ by two? Demonstrate this. Assume now that $\beta_1$ is negative. What value does $p$ approach as $x_{1}$ approaches $\infty$? What value does $p$ approach as $x_{1}$ approaches $-\infty$? **
+
+Let $d(z)$ denote the odds corresponding to $z$. Then, $$d(z) = \frac{p(z)}{1 - p(z)} = \frac{\frac{e^z}{1 + e^z}}{1 - \frac{e^z}{1 + e^z}} = e^z.$$ Then, the odds of the outcome is multiplied by a factor of $$\frac{d(\beta_0 + \beta_{1}(x_{1}+2))}{d(\beta_0 + \beta_{1}x_{1})} = \frac{e^{\beta_0 + \beta_{1}(x_{1}+2)}}{e^{\beta_0 + \beta_{1}x_{1}}} = e^2$$ if $x_1$ increases by two.
+
+For $\beta_1 < 0$, observe that $z \to -\infty$ as $x_1 \to \infty$. Similarly, $z \to \infty$ as $x_1 \to -\infty$. Then, $$\lim_{x_1 \to \infty} p(z) = \lim_{z \to -\infty} \frac{e^z}{1 + e^z} = \frac{\lim_{z \to -\infty} e^z}{1 + \lim_{z \to -\infty} e^z} = \frac{0}{1 + 0} = 0$$ and $$\lim_{x_1 \to -\infty} p(z) = \lim_{z \to \infty} \frac{e^z}{1 + e^z} = \lim_{z \to \infty} \frac{1}{\frac{1}{e^z} + 1} = \frac{1}{\lim_{z \to \infty} \frac{1}{e^z} + 1} = \frac{1}{0 + 1} = 1.$$
