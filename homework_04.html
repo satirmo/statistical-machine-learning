@@ -1806,12 +1806,12 @@ y_k}{n-1}.\]</span> By properties of the Covariance, <span class="math display">
   Cov\left(\hat{\beta}^{(1)}, \hat{\beta}^{(2)}\right)
   &amp;= Cov\left(\frac{y_2 + \sum_{k=3}^{n} y_k}{n-1}, \frac{y_1 +
 \sum_{k=3}^{n} y_k}{n-1}\right) \\
-  &amp;= \frac{1}{n-1} Cov\left(y_2 + \sum_{k=3}^{n} y_k, y_1 +
+  &amp;= \frac{1}{(n-1)^2} Cov\left(y_2 + \sum_{k=3}^{n} y_k, y_1 +
 \sum_{k=3}^{n} y_k\right) \\
-  &amp;= \frac{1}{n-1} Cov\left(\sum_{k=3}^{n} y_k, \sum_{k=3}^{n}
+  &amp;= \frac{1}{(n-1)^2} Cov\left(\sum_{k=3}^{n} y_k, \sum_{k=3}^{n}
 y_k\right) \\
-  &amp;= \frac{1}{n-1} \sum_{k=3}^{n} Cov\left(y_k, y_k\right) \\
-  &amp;= \frac{n-2}{n-1} \sigma^2.
+  &amp;= \frac{1}{(n-1)^2} \sum_{k=3}^{n} Cov\left(y_k, y_k\right) \\
+  &amp;= \frac{n-2}{(n-1)^2} \sigma^2.
 \end{align*}\]</span></p>
 </div>
 </div>

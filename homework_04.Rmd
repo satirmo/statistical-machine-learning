@@ -153,8 +153,8 @@ accuracy(best_predict, truth=survived, estimate=.pred_class)
 \begin{align*}
   Cov\left(\hat{\beta}^{(1)}, \hat{\beta}^{(2)}\right)
   &= Cov\left(\frac{y_2 + \sum_{k=3}^{n} y_k}{n-1}, \frac{y_1 + \sum_{k=3}^{n} y_k}{n-1}\right) \\
-  &= \frac{1}{n-1} Cov\left(y_2 + \sum_{k=3}^{n} y_k, y_1 + \sum_{k=3}^{n} y_k\right) \\
-  &= \frac{1}{n-1} Cov\left(\sum_{k=3}^{n} y_k, \sum_{k=3}^{n} y_k\right) \\
-  &= \frac{1}{n-1} \sum_{k=3}^{n} Cov\left(y_k, y_k\right) \\
-  &= \frac{n-2}{n-1} \sigma^2.
+  &= \frac{1}{(n-1)^2} Cov\left(y_2 + \sum_{k=3}^{n} y_k, y_1 + \sum_{k=3}^{n} y_k\right) \\
+  &= \frac{1}{(n-1)^2} Cov\left(\sum_{k=3}^{n} y_k, \sum_{k=3}^{n} y_k\right) \\
+  &= \frac{1}{(n-1)^2} \sum_{k=3}^{n} Cov\left(y_k, y_k\right) \\
+  &= \frac{n-2}{(n-1)^2} \sigma^2.
 \end{align*}
