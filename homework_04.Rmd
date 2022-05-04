@@ -1,0 +1,160 @@
+---
+title: "PSTAT 231 - Homework 4"
+author: "Tomas"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    code_folding: show
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE,
+                      warning = FALSE)
+
+library(tidyverse)
+library(tidymodels)
+
+library(ggplot2)
+library(ISLR)
+library(ISLR2)
+library(corrplot)
+library(poissonreg)
+library(discrim)
+library(klaR)
+library(MASS)
+library(purrr)
+library(corrr) 
+library(pROC)
+library(recipes)
+library(rsample)
+library(parsnip)
+library(workflows)
+tidymodels_prefer()
+```
+
+  **Create a recipe for this data set identical to the recipe you used in Homework 3.**
+```{r, eval=TRUE, indent="  "}
+set.seed(3982)
+
+titanic = read_csv("titanic.csv")
+titanic$survived = as.factor(titanic$survived)
+titanic$survived = ordered(titanic$survived, levels = c("Yes", "No"))
+titanic$pclass = as.factor(titanic$pclass)
+
+get_recipe = function(data_set){
+  titanic_recipe = recipe(survived ~ pclass+sex+age+sib_sp+parch+fare, data=data_set) %>%
+    step_impute_linear(age) %>%
+    step_dummy(all_nominal_predictors()) %>%
+    step_interact(terms=~starts_with("sex"):fare) %>%
+    step_interact(~age:fare)
+  
+  return (titanic_recipe)
+}
+```
+
+## Classification
+### Question 1
+  **Split the data, stratifying on the outcome variable, survived.  You should choose the proportions to split the data into. Verify that the training and testing data sets have the appropriate number of observations.** The total number of observations is 891 = 623 + 268, i.e. the number of train observations and number of test observations add up to the total number of observations. 
+```{r, eval=TRUE, indent="  "}
+titanic_split = initial_split(titanic, prop=0.70, strata=survived)
+titanic_train = training(titanic_split)
+titanic_test = testing(titanic_split)
+
+str_interp("Total Observations: ${nrow(titanic)}")
+str_interp("Train Observations: ${nrow(titanic_train)}")
+str_interp("Test Observations: ${nrow(titanic_test)}")
+```
+### Question 2
+  **Fold the training data. Use k-fold cross-validation, with $k = 10$.**
+```{r, eval=TRUE, indent="  "}
+titanic_folds = vfold_cv(titanic_train, v=10)
+```
+
+### Question 3
+  **In your own words, explain what we are doing in Question 2. What is k-fold cross-validation? Why should we use it, rather than simply fitting and testing models on the entire training set? If we did use the entire training set, what resampling method would that be?** The training set is divided into $k=10$ random non-overlapping groups (folds) of roughly equal size. In essence, k-fold cross-validation performs the following steps in an iterative fashion for $i = 1, \dots, k$:
+  
+  * Treat the $i$-th fold as the validation set.
+  * Fit a model using all observations in folds $1, \dots, i-1, i+1, \dots, k$.
+  * Compute error (e.g. MSE for regression, TPR for classification) of the model using validation set.
+
+The collection of error values obtained via this process can then be applied for tasks like model selection, and estimating the generalization performance of a model.
+
+The k-fold cross-validation method yields a test error estimate that achieves a solid Bias-Variance tradeoff (the model becomes less biased as k increases); in particular, test error estimate is highly variable as it depends on the training-validation split. Additionally, this approach allows us to measure how well the model is expected to generalize (even when data is limited). If the entire training data is used to fit the model, some of the data is "wasted". The resampling method corresponding to the entire training set is known as the validation set approach.
+
+### Question 4
+  **How many models, total, across all folds, will you be fitting to the data? To answer, think about how many folds there are, and how many models you'll fit to each fold.** There are 3 models being fit to each of the 10 folds, i.e. 30 models will be fit across all folds.
+```{r, eval=TRUE, indent="  "}
+get_workflow = function(model, engine_name, mode_name, recipe){
+  model = model %>% 
+    set_engine(engine_name) %>% 
+    set_mode(mode_name)
+  wkflow = workflow() %>% 
+    add_model(model) %>% 
+    add_recipe(recipe)
+  
+  return (wkflow)
+}
+
+titanic_recipe = get_recipe(titanic_train)
+log_reg_wkflow = get_workflow(logistic_reg(), "glm", "classification", titanic_recipe)
+lda_wkflow = get_workflow(discrim_linear(), "MASS", "classification", titanic_recipe)
+qda_wkflow = get_workflow(discrim_quad(), "MASS", "classification", titanic_recipe)
+```
+
+### Question 5
+  **Fit each of the models created in Question 4 to the folded data.** 
+```{r, eval=FALSE, indent="  "}
+fit_model_to_folds = function(wkflow, folds){
+  model_fit = wkflow %>% fit_resamples(folds)
+  
+  return (model_fit)
+}
+
+log_reg_fit = fit_model_to_folds(log_reg_wkflow, titanic_folds)
+lda_fit = fit_model_to_folds(lda_wkflow, titanic_folds)
+qda_fit = fit_model_to_folds(qda_wkflow, titanic_folds)
+
+save(log_reg_fit, lda_fit, qda_fit, file="fit_models.rda")
+```
+
+### Question 6
+  **Use collect_metrics() to print the mean and standard errors of the performance metric accuracy across all folds for each of the four models. Decide which of the 3 fitted models has performed the best. Explain why. (Note: You should consider both the mean accuracy and its standard error.)** The QDA model achieves the highest mean accuracy (0.8201997). The Logistic Regression and LDA models achieve a mean accuracy of 0.7993856 and 0.7978239, respectively; the standard error of the accuracy of these two models is at most 0.01745479. The standard error of the accuracy for the QDA model is 0.01496060. Therefore, the QDA model performs the best.
+```{r, eval=TRUE, indent="  "}
+load(file="fit_models.rda")
+
+collect_metrics(log_reg_fit)
+collect_metrics(lda_fit)
+collect_metrics(qda_fit)
+```
+
+### Question 7
+  **Now that you’ve chosen a model, fit your chosen model to the entire training dataset (not to the folds).**
+```{r, eval=TRUE, indent="  "}
+best_fit = fit(qda_wkflow, titanic_train)
+```
+
+### Question 8
+  **Finally, with your fitted model, use `predict()`, `bind_cols()`, and `accuracy()` to assess your model’s performance on the testing data! Compare your model’s testing accuracy to its average accuracy across folds. Describe what you see.** The accuracy for the model trained on the entire training set is 0.7985075. This is lower than the average accuracy across the folds (0.8201997). This decrease is interesting as the accuracy standard error for the model fit on the folds is 0.01496060 < 0.8201997 - 0.7985075. This is not strange as the estimate of the test MSE is highly variable depending on the training-validation split.
+```{r, eval=TRUE, indent="  "}
+best_predict = predict(best_fit, new_data=titanic_test) %>%
+  bind_cols(titanic_test)
+accuracy(best_predict, truth=survived, estimate=.pred_class)
+```
+
+### Question 9
+  **Derive the least-squares estimate of $\beta$.** The least-squares estimate $\hat{\beta}$ minimizes $$f(\hat{\beta}) = \sum_{k = 1}^{n} (y_k - \hat{\beta})^2.$$ Thus, $\hat{\beta}$ can be found via the following approach: $$f'(\hat{\beta}) = 0 \implies -2 \sum_{k = 1}^{n} (y_k - \hat{\beta}) = 0 \implies \sum_{k = 1}^{n} y_k = n \hat{\beta} \implies \hat{\beta} = \overline{y}.$$
+
+### Question 10
+
+  **Suppose that we perform leave-one-out cross-validation (LOOCV). Recall that, in LOOCV, we divide the data into $n$ folds. What is the covariance between $\hat{\beta}^{(1)}$, or the least-squares estimator of $\beta$ that we obtain by taking the first fold as a training set, and $\hat{\beta}^{(2)}$, the least-squares estimator of $\beta$ that we obtain by taking the second fold as a training set?** The observations $y_1, \dots, y_n$ have uncorrelated errors with $\epsilon \sim N(0, \sigma^2)$; therefore, $Cov(y_i, y_j) = 0$ for $i \neq j$ and the following holds for all $i = 1, \dots, n$: $$Cov(y_i, y_i) = Var(y_i) = Var(\beta + \epsilon_i) = Var(\epsilon_i) = \sigma^2.$$ By Question 9, $$\hat{\beta}^{(1)} = \frac{y_2 + \sum_{k=3}^{n} y_k}{n-1}$$ and $$\hat{\beta}^{(2)} = \frac{y_1 + \sum_{k=3}^{n} y_k}{n-1}.$$ By properties of the Covariance,
+\begin{align*}
+  Cov\left(\hat{\beta}^{(1)}, \hat{\beta}^{(2)}\right)
+  &= Cov\left(\frac{y_2 + \sum_{k=3}^{n} y_k}{n-1}, \frac{y_1 + \sum_{k=3}^{n} y_k}{n-1}\right) \\
+  &= \frac{1}{n-1} Cov\left(y_2 + \sum_{k=3}^{n} y_k, y_1 + \sum_{k=3}^{n} y_k\right) \\
+  &= \frac{1}{n-1} Cov\left(\sum_{k=3}^{n} y_k, \sum_{k=3}^{n} y_k\right) \\
+  &= \frac{1}{n-1} \sum_{k=3}^{n} Cov\left(y_k, y_k\right) \\
+  &= \frac{n-2}{n-1} \sigma^2.
+\end{align*}
