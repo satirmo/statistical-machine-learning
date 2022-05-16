@@ -1,0 +1,174 @@
+---
+title: "PSTAT 231 - Homework 5"
+author: "Tomas"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    code_folding: show
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE, message=FALSE, warning=FALSE)
+
+library(tidyverse)
+library(tidymodels)
+
+library(ggplot2)
+library(ISLR)
+library(ISLR2)
+library(corrplot)
+library(poissonreg)
+library(discrim)
+library(klaR)
+library(MASS)
+library(purrr)
+library(corrr) 
+library(pROC)
+library(recipes)
+library(rsample)
+library(parsnip)
+library(workflows)
+library(janitor)
+library(glmnet)
+tidymodels_prefer()
+```
+## Elastic Net Tuning
+### Question 1
+  **Install and load the `janitor` package. Use its clean_names() function on the Pokémon data, and save the results to work with for the rest of the assignment. What happened to the data? Why do you think clean_names() is useful?** The column names of the data set were transformed by the clean_names function. In particular, the letters cases and separators were parsed to a consistent format (snake_case); the letters were converted to exclusively lowercase, and the spaces and periods were converted to underscores. The clean_names function is beneficial as it handles problematic column names (such as those with spaces) by standardizing their format, and integrates well into %>% pipelines.
+
+```{r, eval=TRUE, indent="  "}
+pokemon_raw = read.csv('Pokemon.csv')
+pokemon = clean_names(pokemon_raw)
+head(pokemon_raw)
+head(pokemon)
+```
+
+### Question 2
+  **Using the entire data set, create a bar chart of the outcome variable, type_1. How many classes of the outcome are there? Are there any Pokémon types with very few Pokémon? If so, which ones? For this assignment, we'll handle the rarer classes by simply filtering them out. Filter the entire data set to contain only Pokémon whose `type_1` is Bug, Fire, Grass, Normal, Water, or Psychic. After filtering, convert `type_1` and `legendary` to factors.** From the bar chart, one can tell that there are 18 classes of the outcome variable, type_1. There are a considerable number of types that occur approximately 30 times for this variable (Dark, Dragon, Fighting, Ghost, Ground, Ice, Poison, Steel). Then, there is a considerable drop in occurrences. In particular, the Fairy and Flying types have approximately 20 and 5 occurrences as type_1, respectively.
+
+```{r, eval=TRUE, indent="  "}
+ggplot(data=pokemon, aes(x=type_1)) + geom_bar()
+
+pokemon = pokemon %>%
+  filter(type_1 %in%
+           c("Bug", "Fire", "Grass", "Normal", "Water", "Psychic")) %>%
+  mutate(type_1 = as.factor(type_1)) %>%
+  mutate(legendary = as.factor(legendary)) %>%
+  mutate(generation = as.factor(generation))
+```
+### Question 3
+  **Perform an initial split of the data. Stratify by the outcome variable. You can choose a proportion to use. Verify that your training and test sets have the desired number of observations. Next, use v-fold cross-validation on the training set. Use 5 folds. Stratify the folds by type_1 as well. Why might stratifying the folds be useful?** The train-test split proportion is 80% to 20%. In this case, the train set is of size 364 while the test set is of size 94. Note that the number of observations in the data set at this point is 458 = 364 + 94. The class ratios of the outcome variable may not coincide with the class ratios of the data set (from which the train and test sets were created). Thus, stratifying the folds is beneficial as it preserves the original class ratios within each fold.
+
+```{r, eval=TRUE, indent="  "}
+set.seed(2381)
+
+pokemon_split = initial_split(pokemon, prop=0.80, strata=type_1)
+pokemon_train = training(pokemon_split)
+pokemon_test = testing(pokemon_split)
+
+str_interp("Length of data set: ${nrow(pokemon)}")
+str_interp("Length of train set: ${nrow(pokemon_train)}")
+str_interp("Length of test set: ${nrow(pokemon_test)}")
+
+folds = vfold_cv(pokemon_train, v=5, strata=type_1)
+```
+
+### Question 4
+  **Set up a recipe to predict type_1 with legendary, generation, sp_atk, attack, speed, defense, hp, and sp_def.**
+
+```{r, eval=TRUE, indent="  "}
+recipe = recipe(type_1 ~ legendary + generation + sp_atk + attack + speed +
+                  defense + hp + sp_def, data=pokemon_train) %>%
+  step_dummy(legendary, generation) %>% 
+  step_center(all_predictors()) %>% 
+  step_scale(all_predictors())
+```
+
+### Question 5
+  **We'll be fitting and tuning an elastic net, tuning `penalty` and `mixture`. Set up this model and workflow. Create a regular grid for `penalty` and `mixture` with 10 levels each; `mixture` should range from 0 to 1. For this assignment, we'll let `penalty` range from -5 to 5 (it's log-scaled). How many total models will you be fitting when you fit these models to your folded data?** There will be 500 models fit (100 penalty grid configurations times 5 folds).
+
+```{r, eval=TRUE, indent="  "}
+elastic_net = multinom_reg(penalty = tune(), mixture = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("glmnet")
+wkflow = workflow() %>%
+  add_recipe(recipe) %>%
+  add_model(elastic_net)
+penalty_grid = grid_regular(penalty(range=c(-5, 5)),
+                            mixture(range=c(0,1)),
+                            levels=10)
+
+str_interp('Number of penalty grid configurations: ${nrow(penalty_grid)}')
+```
+
+### Question 6
+  **Fit the models to your folded data using tune_grid(). Use autoplot() on the results. What do you notice? Do larger or smaller values of penalty and mixture produce better accuracy and ROC AUC?** The Proportion of Lasso Penalty appears to be inversely correlated with both accuracy and ROC AUC. In particular, the accuracy and ROC AUC is gradually increasing for the first four steps, but then decreases sharply (for regularization between 1e-3 and 1).
+
+```{r, eval=TRUE, indent="  "}
+tuned_models = tune_grid(wkflow, resamples=folds, grid=penalty_grid)
+autoplot(tuned_models)
+```
+
+### Question 7
+  **Use select_best() to choose the model that has the optimal roc_auc. Then use finalize_workflow(), fit(), and augment() to fit the model to the training set and evaluate its performance on the testing set.** The accuracy obtained via the best model is 0.3404255.
+
+```{r, eval=TRUE, indent="  "}
+best_model = select_best(tuned_models, metric="roc_auc")
+final_wkflow = finalize_workflow(wkflow, best_model)
+model_fit = fit(final_wkflow, data=pokemon_train)
+predictions = predict(model_fit, new_data=pokemon_test, type="class")
+acc_test = augment(model_fit, new_data=pokemon_test) %>%
+  accuracy(truth=type_1, estimate=.pred_class)
+
+print(acc_test)
+```
+
+### Question 8
+  **Calculate the overall ROC AUC on the testing set. Then create plots of the different ROC curves, one per level of the outcome. Also make a heat map of the confusion matrix. What do you notice? How did your model do? Which Pokemon types is the model best at predicting, and which is it worst at? Do you have any ideas why this might be?** The overall ROC AUC is 0.6113815. The relatively low accuracy and ROC AUC imply that the model does not perform well. The ROC AUC is largest and smallest for the Bug and Pshychic types, respectively. Thus, it is best at predicting Bug types, and worst at predicting Psychic types. It is worth noting that Normal types have the second largest ROC AUC while Water types have the second smallest ROC AUC.
+
+There are two factors that may contribute to the low performance of the model.
+  
+  * The Psychic type is the type that occurs the second-lowest number of times. On the other hand, the Water type occurs almost double the number of times of the Psychic type. This large variation in occurrences may be contributing factor to the low performance in detecting these two types.
+  * There exist certain tendencies for certain Pokemon types (e.g. Fighting types tend to have a high Attack stat, Rock types tend to have a low Speed stat). However, the recipe does not account for Pokemon evolution stage. A Pokemon's stats tend to increase as it evolves (though there are cases in which a Pokemon gets slower, e.g. Torracat evolving into Incineroar). There also exist Pokemon types whose stats are well-balanced. For example, the average stats of Water type Pokemon are ranked 9th, 11th or 12th when compared to all other types (see https://pokemondb.net/type/water); the Grass type is also relatively well-balanced; this coincides with the fact that several Grass types were predicted to be Water types (see confusion matrix). Thus, it is likely that the data set contains a considerable amount of outliers. This would prevent an effective model from being developed.
+  
+```{r, eval=TRUE, indent="  "}
+overall_roc_auc = augment(model_fit, new_data=pokemon_test) %>%
+  roc_auc(type_1, .pred_Bug, .pred_Fire, .pred_Grass, .pred_Normal, .pred_Water,
+          .pred_Psychic)
+print(overall_roc_auc)
+
+augment(model_fit, new_data=pokemon_test) %>%
+  roc_curve(type_1, .pred_Bug, .pred_Fire, .pred_Grass, .pred_Normal, .pred_Water,
+          .pred_Psychic) %>%
+  autoplot()
+augment(model_fit, new_data=pokemon_test) %>%
+  conf_mat(truth=type_1, .pred_class) %>%
+  autoplot(type="heatmap")
+
+table(pokemon$type_1)
+```
+
+## For 231 Students
+### Exercise 9
+  **In the 2020-2021 season, Stephen Curry, an NBA basketball player, made 337 out of 801 three point shot attempts (42.1%). Use bootstrap resampling on a sequence of 337 1’s (makes) and 464 0’s (misses). For each bootstrap sample, compute and save the sample mean (e.g. bootstrap FG% for the player). Use 1000 bootstrap samples to plot a histogram of those values. Compute the 99% bootstrap confidence interval for Stephen Curry’s “true” end-of-season FG% using the quantile function in R. Print the endpoints of this interval.** The endpoints of the 99% bootstrap confidence interval are 0.3745256 and 0.4619288.
+
+```{r, eval=TRUE, indent="  "}
+made = array(1, 337)
+missed = array(0, 464)
+shots = c(made, missed)
+
+sample_count = 1000
+shots_count = length(shots)
+sample_means = numeric(sample_count)
+
+for(i in 1:sample_count){
+  shot_sample = sample(shots, replace=TRUE)
+  sample_means[i] = mean(shot_sample)
+}
+
+hist(sample_means, main='Bootstrap Sample Means', xlab='Sample Mean', breaks=20)
+quantile(sample_means, probs=c(0.005, 0.995))
+```
