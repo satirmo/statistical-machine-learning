@@ -1,0 +1,10 @@
+Name / Data Type / Measurement Unit / Description
+--------------------------------------------------
+Order Date / ordinal / -- / The date of the sale. Each date is presented in the mm/dd/yyyy format. Only one m is present (instead of mm) if the sale occurred from January through September (inclusive). Only one d is present (instead of dd) if the sale occurred on the first through ninth day of the month (inclusive).
+Brand / nominal / -- / The brand of the sneaker sold (either " Yeezy" or "Off-White").
+Sneaker Name / nominal / -- / The name of the sneaker sold.
+Sale Price / discrete / dollars / The price at which the sneaker was sold (integer-valued). Prices contain dollar signs. Prices more than $999 contain commas.
+Retail Price / discrete / dollars / The original retail price of the sneaker (integer-valued).
+Release Date / ordinal / -- / The date on which the sneaker was first available for purchase. Each date is presented in the mm/dd/yyyy format. Only one m is present (instead of mm) if the sale occurred from January through September (inclusive). Only one d is present (instead of dd) if the sale occurred on the first through ninth day of the month (inclusive).
+Shoe Size / discrete / -- / The US size of the sneaker.
+Buyer Region / nominal / -- / The US region in which the buyer lived; this possible values for this variable are "District of Columbia" or any of the 50 states. The names contain upper case letters.
