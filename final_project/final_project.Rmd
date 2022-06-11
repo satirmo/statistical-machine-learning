@@ -1,0 +1,473 @@
+---
+title: "Predicting Sneaker Sale Prices"
+# author: "Tomas"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE, message=FALSE, warning=FALSE)
+
+library(tidyverse)
+library(tidymodels)
+
+library(ggplot2)
+library(ISLR)
+library(ISLR2)
+library(corrplot)
+library(poissonreg)
+library(discrim)
+library(klaR)
+library(MASS)
+library(purrr)
+library(corrr) 
+library(pROC)
+library(recipes)
+library(rsample)
+library(parsnip)
+library(workflows)
+library(janitor)
+library(glmnet)
+library(rpart.plot)
+library(vip)
+library(randomForest)
+library(xgboost)
+library(ranger)
+library(lubridate)
+library(usmap)
+library(maps)
+library(here)
+tidymodels_prefer()
+```
+
+## Introduction
+
+### Data Set Description
+The sneaker sale data was published by StockX in February 2019; it can be downloaded [here](https://s3.amazonaws.com/stockx-sneaker-analysis/wp-content/uploads/2019/02/StockX-Data-Contest-2019-3.xlsx). The variables recorded for each sale are:
+
+  * Order Date: The date of the sale.
+  * Brand: The brand of the sneaker sold.
+  * Sneaker Name: The name of the sneaker sold.
+  * Sale Price: The price at which the sneaker was sold.
+  * Retail Price: The original retail price of the sneaker.
+  * Release Date: The date on which the sneaker was first available for purchase from retailers.
+  * Shoe Size: The US size of the sneaker.
+  * Buyer Region: The US region in which the buyer lived.
+
+A detailed description of the data set can be found in the data/raw/stockx_sales_codebook.txt file.
+
+## Data Cleaning and Processing
+The initial step involves reading the data set provided by StockX, and importing the data processing functions.
+
+```{r, eval=TRUE, indent="  "}
+sales_raw = read.csv("data/raw/stockx_sales.csv")
+source("scripts/data_processing.R")
+```
+
+The data set contains information about `r nrow(sales_raw)` sneaker sales. Additionally, the data set contains `r sum(is.na(sales_raw))` missing values. The following steps are performed to prepare the data set for exploratory data analysis and model training.
+
+  1. Clean the data set column names.
+```{r, eval=TRUE, indent="  "}
+sales = sales_raw %>% clean_names()
+```
+
+  2. Convert the dollar-valued columns (sale_price and retail_price) to numeric-valued columns.
+```{r, eval=TRUE, indent="  "}
+sales = sales %>%
+  mutate(sale_price=parse_dollar_values(sale_price)) %>%
+  mutate(retail_price=parse_dollar_values(retail_price))
+```
+
+  3. Add the order_weekday column. This column denotes the day of the week on which the sale occurred.
+```{r, eval=TRUE, indent="  "}
+sales = sales %>% mutate(order_weekday=calculate_weekday(order_date))
+```
+
+  4. Add the order_day column. This column denotes the day of the month in which the sale occurred.
+```{r, eval=TRUE, indent="  "}
+sales = sales %>% mutate(order_day=calculate_day(order_date))
+```
+
+  5. Add the order_month column. This column denotes the month of the year in which the sale occurred.
+```{r, eval=TRUE, indent="  "}
+sales = sales %>% mutate(order_month=calculate_month(order_date))
+```
+
+  6. Add order_year column. This column denotes the year in which the sale occurred.
+```{r, eval=TRUE, indent="  "}
+sales = sales %>% mutate(order_year=calculate_year(order_date))
+```
+
+  7. Add the order_days_elapsed column. This column denotes the number of days that have passed between the release date and the order date.
+```{r, eval=TRUE, indent="  "}
+sales = sales %>%
+  mutate(order_days_elapsed=calculate_days_elapsed(order_date) -
+           calculate_days_elapsed(release_date))
+```
+
+  8. Convert the buyer_region column to lower case.
+```{r, eval=TRUE, indent="  "}
+sales = sales %>% mutate(buyer_region=tolower(buyer_region))
+```
+
+  9. Remove the leading white-space characters from the brand names.
+```{r, eval=TRUE, indent="  "}
+sales = sales %>% mutate(brand=wstrip(brand))
+```
+
+  10. Remove the order_date and release_date columns.
+```{r, eval=TRUE, indent="  "}
+sales = sales %>% select(-order_date, -release_date)
+```
+
+  11. Save the processed data set to the "data/processed/stockx_sales.csv" file.
+```{r, eval=TRUE, indent="  "}
+write_csv(sales, here("data", "processed", "stockx_sales.csv"))
+```
+
+In summary, the data set has been transformed to track the following variables:
+
+  * brand: The brand of the sneaker sold.
+  * sneaker_name: The name of the sneaker sold.
+  * sale_price: The price at which the sneaker was sold.
+  * retail_price: The original retail price of the sneaker.
+  * shoe_size: The US size of the sneaker.
+  * order_weekday: The day of the week on which the sneaker was sold.
+  * order_day: The day of the month on which the sneaker was sold.
+  * order_month: The month of the year on which the sneaker was sold.
+  * order_year: The year in which the sneaker was sold.
+  * order_days_elapsed: The number of days that have passed between the release date and the order date.
+  * buyer_region: The US region in which the buyer lived.
+
+A detailed description of the processed data set can be found in the data/processed/stockx_sales_codebook.txt file.
+
+## Exploratory Data Analysis
+The initial step is to read the processed data set, and import the exploratory data analysis functions.
+
+```{r, eval=TRUE, indent="  "}
+sales = read.csv("data/processed/stockx_sales.csv")
+source("scripts/eda.R")
+```
+
+The data set contains `r nrow(sales)` rows and `r ncol(sales)` columns. The data set does not contain any missing values.
+
+### Distribution of Variables
+A natural first step is to examine the distribution of recorded sale prices and potential predictor variables.
+
+#### Sale Prices
+The distribution of sale prices is skewed-right. In particular, a majority of sneakers were sold for less than \$600. Additionally, the minimum, median, and maximum of the sale prices are \$186, \$370, and \$4050, respectively.
+
+```{r, eval=TRUE, warning=FALSE, indent="  "}
+display_fivenum(sales$sale_price, "Sale Price")
+display_histogram(sales$sale_price, "Distribution of Sale Prices", "Sale Price",
+                  "Frequency")
+```
+
+When viewing sale prices of less than \$1000, sneakers were most frequently sold for approximately \$270; a majority of these sneakers were of the Yeezy brand. Additionally, there appears exist a correlation between brand of a sneaker and its sale price: Yeezy sneakers were typically sold at lower prices than Off-White sneakers. This correlation remains consistent when reviewing sale prices of at least \$1500. The difference in sale prices is likely a contributor to the stark difference in overall sales per brand. In particular, the data set consists of roughly 70\% Yeezy sneaker sales.
+```{r, eval=TRUE, warning=FALSE, indent="  "}
+display_counts_and_percentages(sales$brand, "Brand", "Sales")
+
+sales %>%
+  filter(sale_price<1000) %>%
+  ggplot(aes(sale_price, fill=brand)) +
+  geom_histogram(bins=40) +
+  labs(title="Distribution of Sale Prices (Less Than $1000)", x="Sale Price",
+       y="Frequency", fill="Brand")
+
+sales %>%
+  filter(sale_price>1500) %>%
+  ggplot(aes(sale_price, fill=brand)) +
+  geom_histogram(bins=40) +
+  labs(title="Distribution of Sale Prices (Greater than $1500)", x="Sale Price",
+       y="Frequency", fill="Brand")
+```
+
+In particular, Yeezy sneakers account for nine out of the Top 10 most sold sneakers. The only Off-White sneaker in the Top 10 accounts for just 4.64\% of all sales. Additionally, the Top 5 most sold sneakers account for slightly over 50\% of all sales.
+```{r, eval=TRUE, indent="  "}
+display_counts_and_percentages(sales$sneaker_name, "Sneaker Name", "Sales",
+                               top_k=length(unique(sales$sneaker_name)))
+```
+
+Recall that the sale price of Off-White sneakers is typically higher price than Yeezy sneakers. Despite this, the retail price of Off-White sneakers was typically lower than that of Yeezy sneakers. Additionally, there is a wider spread in the retail price of Off-White sneakers; the retail price of Yeezy sneakers is concentrated around \$210.
+```{r, eval=TRUE, warning=FALSE, indent="  "}
+sales %>%
+  group_by(brand, sneaker_name) %>%
+  summarise_at(vars(retail_price), list(price=mean)) %>%
+  ggplot(aes(price, fill=brand)) +
+  geom_histogram(bins=10) +
+  labs(title="Distribution of Retail Prices", x="Retail Price",
+       y="Frequency", fill="Brand")
+```
+
+The size of most shoes sold, ranged from 9.0 through 10.0.
+```{r, eval=TRUE, warning=FALSE, indent="  "}
+sales %>%
+  group_by(brand, sneaker_name) %>%
+  summarise_at(vars(shoe_size), list(size=mean)) %>%
+  ggplot(aes(size, fill=brand)) +
+  geom_histogram(bins=5) +
+  labs(title="Distribution of Shoe Sizes", x="Shoe Size",
+       y="Frequency", fill="Brand")
+```
+
+The number of sales is fairly consistent throughout a given month. However, there is increase in sales toward the end of the month. Additionally, there is an abrupt spike in sales during the middle of the month. 
+```{r, eval=TRUE, warning=FALSE, indent="  "}
+calculate_date = function(row){
+  return (sprintf("%02d-%02d-%02d", row$order_day, row$order_month,
+                  row$order_year%%100))
+}
+
+calculate_day_of_month_counts = function(start_date, end_date){
+  start_date = as.Date(start_date, format="%d-%m-%y")
+  end_date = as.Date(end_date, format="%d-%m-%y")
+  day_of_month_counts = rep(0, 31)
+  
+  current_date = start_date
+  
+  while(current_date <= end_date){
+    day_of_month = day(current_date)
+    current_date = current_date + 1
+    day_of_month_counts[day_of_month] = day_of_month_counts[day_of_month] + 1
+  }
+
+  return (day_of_month_counts)
+}
+
+calculate_day_of_month_sale_averages = function(counts, day_of_month_sales){
+  result = rep(0, 31)
+  
+  for(day_of_month in 1:31){
+    result[day_of_month] = count_occurrences(day_of_month_sales, day_of_month) /
+      counts[day_of_month]
+  }
+  
+  return (result)
+}
+
+calculate_month_counts = function(start_date, end_date){
+  start_date = as.Date(start_date, format="%d-%m-%y")
+  end_date = as.Date(end_date, format="%d-%m-%y")
+  month_counts = rep(0, 12)
+  
+  current_date = start_date
+  
+  while(current_date <= end_date){
+    current_month = month(current_date)
+    current_date = current_date + 1
+    month_counts[current_month] = month_counts[current_month] + 1
+  }
+
+  return (month_counts)
+}
+
+calculate_month_sale_averages = function(counts, month_sales){
+  result = rep(0, 12)
+  
+  for(current_month in 1:12){
+    result[current_month] = count_occurrences(current_month, month_sales) /
+      counts[current_month]
+  }
+  
+  return (result)
+}
+
+calculate_year_counts = function(start_date, end_date){
+  start_date = as.Date(start_date, format="%d-%m-%y")
+  end_date = as.Date(end_date, format="%d-%m-%y")
+  year_counts = rep(0, 3)
+  
+  current_date = start_date
+  
+  while(current_date <= end_date){
+    current_year = year(current_date) - 2016
+    current_date = current_date + 1
+    year_counts[current_year] = year_counts[current_year] + 1
+    print()
+  }
+  
+  print(year_counts)
+
+  return (year_counts)
+}
+
+start_date = calculate_date(head(sales, 1))
+end_date = calculate_date(tail(sales, 1))
+
+counts = calculate_day_of_month_counts(start_date, end_date)
+sale_averages = calculate_day_of_month_sale_averages(counts, sales$order_day)
+display_barplot(1:31, sale_averages, "Distribution of Average Daily Sales",
+                "Day of Month", "Average Sales")
+
+counts = calculate_month_counts(start_date, end_date)
+sale_averages = calculate_month_sale_averages(counts, sales$order_month)
+display_barplot(1:12, sale_averages, "Distribution of Average Monthly Sales",
+                "Month", "Average Sales")
+
+counts = calculate_year_counts(start_date, end_date)
+print(counts)
+display_barplot(2017:2019, counts, "Distribution of Average Annual Sales",
+                "Year", "Average Sales")
+```
+## Border
+
+```{r, eval=TRUE, indent="  "}
+set.seed(6470)  # Set the seed for reproducibility.
+sales_raw = read.csv('data/raw/stockx_sales.csv') # Read the sales data set.
+source("scripts/data_processing.R")
+```
+
+
+
+
+A natural first step is to examine the dates during which the sales occurred. Define sale volume as the number of sneaker sales that occurred within a predefined time period; note that this coincides with the definition of [trading volume](https://www.investopedia.com/terms/v/volume.asp). The following bar plot displays the monthly volume of recorded sales. The monthly volume appears to exhibit a periodic behavior. In particular, the volume tends to reach a maximum in the Summer and Winter (approximately July and December, respectively), and a minimum in the Spring and Fall. The increased Winter volume is likely attributed to the holiday season.
+```{r, eval=TRUE, warning=FALSE, indent="  "}
+sales %>%
+  group_by(order_year, order_month) %>%
+  summarise(counts=n()) %>%
+  mutate(label=sprintf("%4d/%02d", order_year, order_month)) %>%
+  arrange(12*order_year+order_month) %>%
+  ggplot(aes(x=label, y=counts)) +
+  geom_col(stat="identity") +
+  coord_flip() +
+  ggtitle("Monthly Sale Volume") +
+  xlab("Month (yyyy/mm)") +
+  ylab("Sneakers Sold")
+```
+
+The following box plot shows that sale prices are less volatile in the Summer and Winter (July and December, respectively). This trend may be related to the increased Summer and Winter sale volume. In the stock market, large sales volume is often inversely correlated with volatility. Though there are a myriad of factors that affect volatility in the stock market (e.g. earnings results, company news, etc.), a low number of bids and asks tends to be one of the main causes; a bid refers to the act of offering to buy an asset at a certain price, while an ask refers to the act of offering to sell an asset at a certain price. Volatility arises in this case as buyers either underpay or overpay for an asset. Since sales volume is limited by the number of bids and asks, it is expected that volatility and sales volume is inversely correlated. Unfortunately, the data set does not contain information regarding bids and asks; thus, this hypothesis cannot be verified.
+
+Observe that there are a considerable number of outliers. Most of these outliers are greater than their corresponding box plot. This shows that buyers are willing to overpay for a sneaker; given the exclusivity of Yeezy and Off-White sneakers, this is not surprising.
+```{r, eval=TRUE, indent="  "}
+sales %>%
+  mutate(order_month=sprintf("%02d", order_month)) %>%
+  mutate(order_year=as.character(order_year)) %>%
+  ggplot(aes(x=order_month, y=sale_price, fill=order_year)) +
+  geom_boxplot() +
+  xlab("Month") +
+  ylab("Sale Price") +
+  labs(fill="Year")
+```
+
+
+```{r, eval=TRUE, warning=FALSE, indent="  "}
+# retail_prices = sales %>%
+#   group_by(sneaker_name) %>%
+#   summarise_at(vars(retail_price), list("Retail Price ($)"=mean))
+# mean_sale_prices = sales %>%
+#   group_by(brand, sneaker_name) %>%
+#   summarise_at(vars(sale_price), list("Average Sale Price ($)"=mean))
+# brands = sales %>%
+#   group_by(sneaker_name) %>%
+#   summarise_at(vars(brand), list("Average Sale Price ($)"=identity))
+# df = as.data.frame(table(sales$sneaker_name, dnn=list("Sneaker Name")),
+#                    responseName="Sales") %>%
+#   mutate(Percentage=round(prop.table(Sales)*100, 2)) %>%
+#   left_join(retail_prices, by = c("Sneaker.Name"="sneaker_name")) %>%
+#   left_join(mean_sale_prices, by = c("Sneaker.Name"="sneaker_name")) %>%
+#   rename("Sneaker Name"="Sneaker.Name") %>%
+#   relocate("Retail Price ($)", .before="Sales") %>%
+#   relocate("Average Sale Price ($)", .before="Sales") %>%
+#   as.data.frame() %>%
+#   arrange(desc(Percentage))
+#   
+# head(df %>% select(-brand), nrow(df))
+# 
+# 
+# names(df)
+# df %>%
+#   ggplot(aes("Retail Price ($)", fill=brand)) +
+#   geom_histogram(bins=20) +
+#   labs(title="Distribution of Retail Prices", x="Retail Price",
+#        y="Frequency", fill="Brand")
+```
+<!-- The data set contains information about sales that occurred in the United States of America. Thus, a natural first step is examine the number of sales that occurred per state. -->
+<!-- ```{r, eval=TRUE, indent="  "} -->
+<!-- sales %>% -->
+<!--   group_by(buyer_state) %>% -->
+<!--   summarise(counts=n()) %>% -->
+<!--   arrange(desc(counts)) %>% -->
+<!--   slice(1:5) -->
+
+<!-- volume_per_state = sales %>% -->
+<!--   group_by(buyer_state) %>% -->
+<!--   summarise(sales_count=n()) -->
+<!-- states = map_data("state") %>% -->
+<!--   clean_names() %>% -->
+<!--   mutate(buyer_state=region) %>% -->
+<!--   left_join(y=sales_by_buyer_state, by=c("buyer_state")) -->
+
+<!-- ggplot() + -->
+<!--   geom_polygon(data=states, -->
+<!--                aes(x=long, y=lat, group=group, fill=sales_count), -->
+<!--                color="white", size = 0.5) + -->
+<!--   ggtitle("Sales Per State") + -->
+<!--   xlab("Longitude") + -->
+<!--   ylab("Latitude") + -->
+<!--   labs(fill="Sales") -->
+<!-- ``` -->
+
+
+<!-- ## Later Sections -->
+<!-- ```{r, eval=TRUE, indent="  "} -->
+
+<!-- ``` -->
+<!-- ```{r, eval=TRUE, indent="  "} -->
+<!-- ``` -->
+<!-- <!-- a --> -->
+<!-- <!-- # ```{r, eval=TRUE, indent="  "} --> -->
+<!-- <!-- # sales %>% --> -->
+<!-- <!-- #   mutate(order_month=sprintf("%02d", order_month)) %>% --> -->
+<!-- <!-- #   mutate(order_year=as.character(order_year)) %>% --> -->
+<!-- <!-- #   ggplot(aes(x=order_month, y=profit, fill=order_year)) + --> -->
+<!-- <!-- #   geom_boxplot() --> -->
+<!-- <!-- #  --> -->
+<!-- <!-- # # sales %>% --> -->
+<!-- <!-- # #   group_by(order_month, order_year) %>% --> -->
+<!-- <!-- # #   summarise(count=n()) %>% --> -->
+<!-- <!-- # #   ggplot(aes(x=order_month, y=count, fill=order_year)) + --> -->
+<!-- <!-- # #     geom_boxplot() --> -->
+<!-- <!-- # # hist(sales$order_month, main="Sales Per Month", --> -->
+<!-- <!-- # #      xlab="Highway miles per gallon") --> -->
+<!-- <!-- # ``` --> -->
+<!-- <!-- # ```{r, eval=TRUE, indent="  "} --> -->
+<!-- <!-- # sales %>%  --> -->
+<!-- <!-- #   select(-c(order_day, release_day, release_month)) %>% --> -->
+<!-- <!-- #   select_if(is.numeric) %>% --> -->
+<!-- <!-- #   cor(.) %>% --> -->
+<!-- <!-- #   corrplot(method="number", type="lower", order='alphabet', diag=FALSE) --> -->
+<!-- <!-- # ``` --> -->
+<!-- <!-- #  --> -->
+<!-- <!-- # ```{r, eval=TRUE, indent="  "} --> -->
+<!-- <!-- # count_manufacturer_frequency = function(value){ --> -->
+<!-- <!-- #   return (length(which(mpg$manufacturer == value))) --> -->
+<!-- <!-- # } --> -->
+<!-- <!-- #  --> -->
+<!-- <!-- # names = unique(mpg$manufacturer) --> -->
+<!-- <!-- # freqs = sort(sapply(names, count_manufacturer_frequency)) --> -->
+<!-- <!-- # barplot(freqs, main="Manufacturer Production", xlab="Frequency", ylab="Manufacturers", horiz=TRUE, names.arg=names(freqs), las=1, cex.names=0.5) --> -->
+<!-- <!-- #  --> -->
+<!-- <!-- # # sales %>% --> -->
+<!-- <!-- # #   group_by(brand) %>% --> -->
+<!-- <!-- # #   summarise(counts = n()) %>% --> -->
+<!-- <!-- # #   ggplot(aes(x=brand, y=counts)) + --> -->
+<!-- <!-- # #   geom_bar(fill = "#0073C2FF", stat = "identity") + --> -->
+<!-- <!-- # #   geom_text(aes(label = counts), vjust = -0.3) --> -->
+<!-- <!-- #  --> -->
+<!-- <!-- # sales[sales$brand != "Off-White",] %>% --> -->
+<!-- <!-- #   group_by(sneaker_name) %>% --> -->
+<!-- <!-- #   summarise(counts = n()) %>% --> -->
+<!-- <!-- #   ggplot(aes(x=sneaker_name, y=counts)) + --> -->
+<!-- <!-- #   geom_bar(fill = "#0073C2FF", stat = "identity") + --> -->
+<!-- <!-- #   geom_text(aes(label = counts), vjust = -0.3) --> -->
+<!-- <!-- # ``` --> -->
+<!-- <!-- # ```{r, eval=TRUE, indent="  "} --> -->
+<!-- <!-- # ggplot(sales, aes(x=order_month, y=profit, fill=brand)) + --> -->
+<!-- <!-- #   geom_boxplot() --> -->
+<!-- <!-- # ``` --> -->
+<!-- ```{r, eval=TRUE, indent="  "} -->
+
