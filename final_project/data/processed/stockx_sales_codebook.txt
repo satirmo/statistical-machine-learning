@@ -5,9 +5,10 @@ sneaker_name / nominal / -- / The name of the sneaker sold.
 sale_price / discrete / dollars / The price at which the sneaker was sold (integer-valued).
 retail_price / discrete / dollars / The original retail price of the sneaker (integer-valued).
 shoe_size / discrete / -- / The US size of the sneaker.
-order_workday / ordinal / -- / The day of the week on which the sneaker was sold ("Monday", "Tuesday", ..., "Sunday").
+order_weekday / ordinal / -- / The day of the week on which the sneaker was sold ("Monday", "Tuesday", ..., "Sunday").
 order_day / ordinal / -- / The day of the month on which the sneaker was sold (1, 2, ..., 31). 
 order_month / ordinal / -- / The month of the year on which the sneaker was sold. The possible values for this variable are 1 (corresponds to January), 2 (corresponds to February), ..., 12 (corresponds to December).
 order_year / ordinal / -- / The year in which the sneaker was sold (2017, 2018, 2019).
-order_days_elapsed / discrete / days / The number of days that have passed between the release date and the order date.
+order_elapsed / discrete / days / The number of days that have passed between the release date and the order date.
+order_days / discrete / days / The number of days that have passed between January 1st, 1970 and the order date.
 buyer_region / nominal / -- / The US region in which the buyer lived; this possible values for this variable are "district of columbia" or any of the 50 states. The names do not contain upper case letters.
