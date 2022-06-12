@@ -1,0 +1,9 @@
+Name / Data Type / Measurement Unit / Description
+--------------------------------------------------
+brand / nominal / -- / The brand of the sneaker sold (either "Yeezy" or "Off-White").
+sneaker_name / nominal / -- / The name of the sneaker sold.
+sale_price / discrete / dollars / The price at which the sneaker was sold (integer-valued).
+order_day / ordinal / -- / The day of the month on which the sneaker was sold (1, 2, ..., 31). 
+order_month / ordinal / -- / The month of the year on which the sneaker was sold. The possible values for this variable are 1 (corresponds to January), 2 (corresponds to February), ..., 12 (corresponds to December).
+order_elapsed / discrete / days / The number of days that have passed between the release date and the order date.
+order_days / discrete / days / The number of days that have passed between January 1st, 1970 and the order date.
